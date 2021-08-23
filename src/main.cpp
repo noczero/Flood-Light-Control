@@ -34,8 +34,10 @@ String dateTimeNow = "";
 // Scheduler
 void sendDataToFirebase();
 void getDataFromFirebase();
+void checkScheduledTime();
 SchedTask sendDataToFirebaseTask(0, 1500, sendDataToFirebase);   // create task for send data to firebase every 1s
 SchedTask getDataFromFirebaseTask(0, 1000, getDataFromFirebase); // create task for receiving data from firebase every 1s
+SchedTask checkScheduledTimeTask(0, 1000, checkScheduledTime);
 
 // Variable Light declaration as array
 String lightCommandsArray[4];
@@ -91,6 +93,18 @@ String readRelayStatus(int relayPin)
   }
 }
 
+// turn ON light by index
+void turnLightON(int lightIndex)
+{
+  digitalWrite(lightRelayPINArray[lightIndex], LOW);
+}
+
+// turn OFF light by index
+void turnLightOFF(int lightIndex)
+{
+  digitalWrite(lightRelayPINArray[lightIndex], HIGH);
+}
+
 // setup firebase
 void setupFirebase()
 {
@@ -130,6 +144,41 @@ void setupTime()
   Serial.println(dateTimeNow);
 }
 
+// handle command response
+void handleCommandResponse(String command, int lightIndex)
+{
+  if (command == "ON")
+  {
+    turnLightON(lightIndex); // light ON
+  }
+  else if (command == "OFF")
+  {
+    turnLightOFF(lightIndex); // light OFF
+  }
+}
+
+// handle schedule time start response
+void handleScheduledTimeStartResponse(String timeStart, int lightIndex)
+{
+  // check time
+  String hoursMinutesNow = IDTime.dateTime("H:i"); // get time on format HH:MM, for example 17:00, 18:00
+  if (hoursMinutesNow == timeStart)
+  {
+    turnLightON(lightIndex);
+  }
+}
+
+// handle schedule time start response
+void handleScheduledTimeEndResponse(String timeEnd, int lightIndex)
+{
+  // check time
+  String hoursMinutesNow = IDTime.dateTime("H:i"); // get time on format HH:MM, for example 17:00, 18:00
+  if (hoursMinutesNow == timeEnd)
+  {
+    turnLightOFF(lightIndex);
+  }
+}
+
 void setup()
 {
   // put your setup code here, to run once:
@@ -139,16 +188,16 @@ void setup()
   setupRelay();    // start relay setup
   setupWiFI();     // start WiFi setup
   setupFirebase(); // start Firebase setup
-  setupTime(); // start setup time
+  setupTime();     // start setup time
 }
 
 void loop()
 {
   // put your main code here, to run repeatedly:
-  // demoRelay(); // relay demo
-  events(); // eztime event loop
+  //demoRelay(); // relay demo
+  events();                // eztime event loop
   SchedBase::dispatcher(); // dispatch any tasks due
-  delay(100);
+  delay(500);
 }
 
 // send data to firebase
@@ -156,7 +205,7 @@ void sendDataToFirebase()
 {
   for (int i = 0; i < 4; i++)
   {
-    Serial.println("\nLight-" + String(i+1));
+    Serial.println("\nLight-" + String(i + 1));
     // update light 1 status
     json.clear();
     String relayStatus = readRelayStatus(lightRelayPINArray[i]);
@@ -166,7 +215,7 @@ void sendDataToFirebase()
     // check response
     if (send_resp)
     {
-      Serial.println("Success, update status to " + relayStatus + " on Light-" + String(i+1));
+      Serial.println("Success, update status to " + relayStatus + " on Light-" + String(i + 1));
     }
   }
 }
@@ -174,20 +223,22 @@ void sendDataToFirebase()
 // get data from firebase
 void getDataFromFirebase()
 {
-  
+
   for (int i = 0; i < 4; i++)
   {
-    Serial.println("\nLight-" + String(i+1));
-    // read command  
+    Serial.println("\nLight-" + String(i + 1));
+    // read command
     if (Firebase.getString(firebaseData, lightFirebasePathArray[i] + "/command"))
     {
       if (firebaseData.dataType() == "string")
       {
         lightCommandsArray[i] = firebaseData.stringData();
         Serial.println("Receive light command : " + lightCommandsArray[i]);
+
+        // do action based on received command
+        handleCommandResponse(lightCommandsArray[i], i);
       }
     }
-
 
     // read scheduled time start
     if (Firebase.getString(firebaseData, lightFirebasePathArray[i] + "/scheduled_time/start"))
@@ -196,6 +247,9 @@ void getDataFromFirebase()
       {
         lightScheduledTimeStartArray[i] = firebaseData.stringData();
         Serial.println("Receive scheduled time start : " + lightScheduledTimeStartArray[i]);
+
+        // do action based on time start
+        // handleScheduledTimeStartResponse(lightScheduledTimeStartArray[i], i);
       }
     }
 
@@ -206,9 +260,84 @@ void getDataFromFirebase()
       {
         lightScheduledTimeEndArray[i] = firebaseData.stringData();
         Serial.println("Receive scheduled time end : " + lightScheduledTimeEndArray[i]);
+
+        // do cation based on time end
+        // handleScheduledTimeEndResponse(lightScheduledTimeEndArray[i], i);
       }
     }
-      /* code */
+    /* code */
+  }
+}
+
+void parseHoursToInt(String hoursMinutes, int arrHoursMinutes[])
+{
+  // Length (with one extra character for the null terminator)
+  int str_len = hoursMinutes.length() + 1;
+
+  // Prepare the character array (the buffer)
+  char char_array[str_len];
+
+  // Copy it over
+  hoursMinutes.toCharArray(char_array, str_len);
+
+  char *token = strtok(char_array, ":");
+
+  // Keep printing tokens while one of the
+  // delimiters present in str[].
+  int i = 0;
+  String parsedString[2];
+  while (token != NULL)
+  {
+    parsedString[i] = token;
+    token = strtok(NULL, ":");
+    i++;
   }
 
+  arrHoursMinutes[0] = parsedString[0].toInt(); // to integer
+  arrHoursMinutes[1] = parsedString[1].toInt(); // to integer
+}
+
+void checkScheduledTime()
+{
+
+  for (int i = 0; i < 4; i++)
+  {
+    Serial.println("\nLight-" + String(i + 1));
+    String hoursMinutesNow = IDTime.dateTime("H:i"); // get time on format HH:MM, for example 17:00, 18:00
+    // time_t timeNow = IDTime.now();
+    //uint8_t hours = IDTime.hour(timeNow);
+    //uint8_t minutes = IDTime.minute(timeNow);
+
+    //Serial.println(hoursMinutesNow);
+
+    int hoursnMinutesNow[2];
+    parseHoursToInt(hoursMinutesNow, hoursnMinutesNow);
+    //Serial.println(hoursnMinutesNow[0]);
+    //Serial.println(hoursnMinutesNow[1]);
+    //Serial.println(hoursMinutesNow[2]);
+
+    // time start
+    int hoursnMinutesStart[2];
+    parseHoursToInt(lightScheduledTimeStartArray[i], hoursnMinutesStart);
+
+    // time end
+    int hoursnMinutesEnd[2];
+    parseHoursToInt(lightScheduledTimeEndArray[i], hoursnMinutesEnd);
+
+    Serial.print(hoursnMinutesNow[0]); Serial.print(hoursnMinutesNow[1]); Serial.println();
+    Serial.print(hoursnMinutesStart[0]); Serial.print(hoursnMinutesStart[1]); Serial.println();
+    Serial.print(hoursnMinutesEnd[0]); Serial.print(hoursnMinutesEnd[1]); Serial.println();
+    Serial.println();
+    // compare time hh now >= hh start and mm now >= mm start and hh now <= hh end and mm now <= mm end
+    if ((hoursnMinutesNow[0] >= hoursnMinutesStart[0]) && (hoursMinutesNow[1] >= hoursnMinutesStart[1]) && (hoursMinutesNow[0] <= hoursnMinutesEnd[0]))
+    {
+      Serial.println("Still on");
+      //turnLightON(i);
+    }
+    else
+    {
+      Serial.println("Off");
+      //turnLightOFF(i);
+    }
+  }
 }
